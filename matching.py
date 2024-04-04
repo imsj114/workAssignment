@@ -1,24 +1,58 @@
 import sys
 from collections import defaultdict
-import numpy as np
-from scipy.optimize import linear_sum_assignment
 
-def parseInput(inputFile):
-    timeTable = {}
-    with open(inputFile, "r") as openFile:
-        for line in openFile:
-            name, available = line.split()
-            timeTable[name] = list(map(int, available))
-    return timeTable
+MIN_SLOT_PER_PERSON = 10
+MAX_SLOT_PER_PERSON = 13
+
+def timeToTID(h, m):
+    return h*2 + m//30
+def TIDToTime(tid):
+    return (tid//2, (tid%2)*30)
+
+defaultDayTime = \
+    [((8, 30), (10, 00)),\
+     ((10, 00), (10, 30)),\
+     ((10, 30), (11, 00)),\
+     ((11, 00), (11, 30)),\
+     ((11, 30), (12, 00)),\
+     ((13, 00), (13, 30)),\
+     ((13, 30), (14, 00)),\
+     ((14, 00), (14, 30)),\
+     ((14, 30), (15, 00)),\
+     ((15, 00), (15, 30)),\
+     ((15, 30), (16, 00)),\
+     ((16, 00), (16, 30)),\
+     ((16, 30), (17, 00)),\
+     ((17, 00), (17, 30)),\
+     ((17, 30), (18, 00)),\
+     ((18, 00), (19, 30))]
+
+class DayTable():
+    def __init__(self):
+        self.cells = {tid:0 for tid in map(timeToTID, defaultDayTime)}
+
+class WeekTable():
+    def __init__(self):
+        self.numDays = 5
+        self.dayTables = [DayTable()] * 5
+
+class WeightTable(WeekTable):
+    def updateWeight(self):
+        pass
+    
+    def maxCell(self):
+        pass
+        # return (day, tid, weight)
+class AssignmentTable(WeekTable):
+    def assignNewCell(self, costTables):
+        for person, costTable in costTables.items():
+            costTable.maxCell()
 
 class TableMatcher():
-    def __init__(self, timeTable, MIN_SLOT_PER_PERSON, MAX_SLOT_PER_PERSON):
-        self.names, self.available = zip(*timeTable.items())
-        self.MIN_SLOT_PER_PERSON = MIN_SLOT_PER_PERSON
-        self.MAX_SLOT_PER_PERSON = MAX_SLOT_PER_PERSON
-        self.numPeople = len(self.names)
-        self.numSlot = len(self.available[0])
-        self.assignments = [None]*self.numSlot
+    def __init__(self, timeTable):
+        self.timeTable = timeTable
+        self.numPeople = len(self.timeTable)
+        self.assignments = WeekTable()
     
     def weight(self, person, slot, idx):
         # alpha: higher if idx is large, dramatic decrease after MIN_SLOT_PER_PERSON
@@ -38,43 +72,26 @@ class TableMatcher():
 
     # Remove 8:30~10:00, 18:00~19:30
 
-    # First round: assign just one person per slot
-    def build_cost_matrix(self):
-        # worker (person, idx), slot
-        cost_matrix = np.zeros((self.numPeople*self.MAX_SLOT_PER_PERSON, self.numSlot))
-
-        for person in range(self.numPeople):
-            for idx in range(self.MAX_SLOT_PER_PERSON):
-                for slot in range(self.numSlot):
-                    cost_matrix[person*self.MAX_SLOT_PER_PERSON + idx][slot] = self.weight(person, slot, idx)*self.available[person][slot]
-        return cost_matrix
-
-    # Second round: assign second person if possible
-    # def build_cost_matrix_2(self, occupied, slots_left):
-    #     cost_matrix = np.zeros((self.numPeople*self.MAX_SLOT_PER_PERSON, self.numSlot))
-
-    #     for person in range(self.numPeople):
-    #         for idx in range(self.MAX_SLOT_PER_PERSON):
-    #             for slot in range(self.numSlot):
-    #                 cost_matrix[person*self.MAX_SLOT_PER_PERSON + idx][slot] = self.weight(slot, idx)*self.assignments[person][slot]
-    #     return cost_matrix
-
     def match(self):
-        cost_matrix = self.build_cost_matrix()
-        row_ind, col_ind = linear_sum_assignment(cost_matrix, maximize=True)
+
+        # First: parse input table, convert to WeekTable objects
+        # WeekTable keeps personal score for each slot
+        for person in self.names
+        weekTable = WeekTable()
+
         
-        # First round
-        self.assignments = [-1]*self.numSlot
-        for i in range(len(row_ind)):
-            person = row_ind[i] // self.MAX_SLOT_PER_PERSON
-            idx = row_ind[i] % self.MAX_SLOT_PER_PERSON
-            slot = col_ind[i]
-            if self.available[person][slot] == 1:
-                self.assignments[slot] = (person, idx)
-        
-        # Second round
+        # Second: one cell by one, assign a cell
+
         
         return self.assignments
+
+def parseInput(inputFile):
+    timeTable = {}
+    with open(inputFile, "r") as openFile:
+        for line in openFile:
+            name, available = line.split()
+            timeTable[name] = list(map(int, available))
+    return timeTable
 
 def main():
     if len(sys.argv) != 2:
