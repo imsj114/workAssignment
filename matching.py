@@ -69,7 +69,7 @@ class TableMatcher():
             person = row_ind[i] // self.MAX_SLOT_PER_PERSON
             idx = row_ind[i] % self.MAX_SLOT_PER_PERSON
             slot = col_ind[i]
-            if self.available[person][idx] == 1:
+            if self.available[person][slot] == 1:
                 self.assignments[slot] = (person, idx)
         
         # Second round
