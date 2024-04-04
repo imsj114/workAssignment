@@ -1,10 +1,18 @@
 import sys
 from collections import defaultdict
+from enum import Enum
 
+DAYS = 5
 MIN_SLOT_PER_PERSON = 10
 MAX_SLOT_PER_PERSON = 13
 
-def timeToTID(h, m):
+class State(Enum):
+    EMPTY = 0
+    CLASS = 1
+    WORK = 2
+
+def timeToTID(x):
+    h, m = x
     return h*2 + m//30
 def TIDToTime(tid):
     return (tid//2, (tid%2)*30)
@@ -26,64 +34,89 @@ defaultDayTime = \
      ((17, 00), (17, 30)),\
      ((17, 30), (18, 00)),\
      ((18, 00), (19, 30))]
+DAY_SLOTS = len(defaultDayTime)
 
-class DayTable():
+class AssignmentTable():
     def __init__(self):
-        self.cells = {tid:0 for tid in map(timeToTID, defaultDayTime)}
+        self.table = [[None]*DAY_SLOTS for _ in range(DAYS)]
 
-class WeekTable():
-    def __init__(self):
-        self.numDays = 5
-        self.dayTables = [DayTable()] * 5
-
-class WeightTable(WeekTable):
-    def updateWeight(self):
-        pass
+    def assignPerson(self, day, tid, person):
+        self.table[day][tid] = person
     
-    def maxCell(self):
-        pass
-        # return (day, tid, weight)
-class AssignmentTable(WeekTable):
-    def assignNewCell(self, costTables):
-        for person, costTable in costTables.items():
-            costTable.maxCell()
+    def getAssignment(self, day, tid):
+        return self.table[day][tid]
+
+    def asTable(self):
+        return self.table
+class ScheduleTable():
+    def __init__(self, classSchedule):
+        self.scheduleTable = [[State.EMPTY]*DAY_SLOTS for _ in range(DAYS)]
+        self.weightTable = [[0.0]*DAY_SLOTS for _ in range(DAYS)]
+        self.numWorks = 0
+
+        classIter = iter(classSchedule)
+        # Assume that tid is in order
+        for day in range(DAYS):
+            for tid in range(DAY_SLOTS):
+                self.scheduleTable[day][tid] = State(next(classIter))
+    
+    def getWeight(self, day, tid):
+        return self.weightTable[day][tid]
+    
+    def getSchedule(self, day, tid):
+        return self.scheduleTable[day][tid]
+    
+    def updateWeight(self, numAvailTable):
+        for day in range(DAYS):
+            for tid in range(DAY_SLOTS):
+                if self.scheduleTable[day][tid] == State.EMPTY:
+                    self.weightTable[day][tid] = 100.0/(numAvailTable[day][tid]+1)
+                else:
+                    self.weightTable[day][tid] = 0.0
+
+    def assignWork(self, day, tid):
+        if self.scheduleTable[day][tid] != State.EMPTY:
+            raise RuntimeError()
+        self.scheduleTable[day][tid] = State.WORK
 
 class TableMatcher():
-    def __init__(self, timeTable):
-        self.timeTable = timeTable
-        self.numPeople = len(self.timeTable)
-        self.assignments = WeekTable()
-    
-    def weight(self, person, slot, idx):
-        # alpha: higher if idx is large, dramatic decrease after MIN_SLOT_PER_PERSON
-        if idx <= self.MIN_SLOT_PER_PERSON:
-            alpha = 100 - idx//4*4
-        else:
-            alpha = 20 - idx//4*4
-        # beta: distance from the occupied
-        d = 0
-        while d < 16:
-            lo, hi = slot - d, slot + d
-            if (lo//16 == slot//16 and self.available[person][lo] == 0) or (hi//16 == slot//16 and self.available[person][hi] == 0):
+    def __init__(self, classSchedules):
+        self.numPeople = len(classSchedules)
+        
+        self.scheduleTables = {}
+        for person, classTable in classSchedules.items():
+            self.scheduleTables[person] = ScheduleTable(classTable)
+        self.assignmentTable = AssignmentTable()
+
+    def match(self):        
+        # One cell by one, assign a cell
+        for _ in range(DAYS * len(defaultDayTime)):
+            # 1. Update weights
+            numAvailTable = [[0]*DAY_SLOTS for _ in range(DAYS)]
+            for scheduleTable in self.scheduleTables.values():
+                for day in range(DAYS):
+                    for tid in range(DAY_SLOTS):
+                        if scheduleTable.getSchedule(day, tid) == State.EMPTY:
+                            numAvailTable[day][tid] += 1
+            for scheduleTable in self.scheduleTables.values():
+                scheduleTable.updateWeight(numAvailTable)
+
+            # 2. Choose a slot with max weight
+            maxPerson, maxDay, maxTid, maxWeight = None, None, None, float('-inf')
+            for day in range(DAYS):
+                for tid in range(DAY_SLOTS):
+                    if self.assignmentTable.getAssignment(day, tid) == None:
+                        for person, scheduleTable in self.scheduleTables.items():
+                            weight = scheduleTable.getWeight(day, tid)
+                            if weight > maxWeight:
+                                maxPerson, maxDay, maxTid, maxWeight = person, day, tid, weight
+            # 3. Assign
+            if maxPerson == None:
                 break
-            d += 1
-        beta = 2.0 - (0.1*(d//4))
-        return alpha*beta
-
-    # Remove 8:30~10:00, 18:00~19:30
-
-    def match(self):
-
-        # First: parse input table, convert to WeekTable objects
-        # WeekTable keeps personal score for each slot
-        for person in self.names
-        weekTable = WeekTable()
-
-        
-        # Second: one cell by one, assign a cell
-
-        
-        return self.assignments
+            self.assignmentTable.assignPerson(maxDay, maxTid, maxPerson)
+            self.scheduleTables[maxPerson].assignWork(maxDay, maxTid)
+            
+        return self.assignmentTable.asTable()
 
 def parseInput(inputFile):
     timeTable = {}
@@ -98,16 +131,10 @@ def main():
         print("Usage: python3 matching.py [input file]")
         exit(0)
     inputFile = sys.argv[1]
-    timeTable = parseInput(inputFile)
-    matcher = TableMatcher(timeTable, 10, 13)
+    classSchedule = parseInput(inputFile)
+    matcher = TableMatcher(classSchedule)
     result = matcher.match()
-    # personCnt = [0]*12
-    # for person, _ in result:
-    #     personCnt[person] += 1
-
-
-    for i in range(5):
-        print(result[i*16:(i+1)*16])
+    print(result)
 
 if __name__ == "__main__":
     main()
