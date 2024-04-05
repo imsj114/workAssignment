@@ -87,24 +87,25 @@ class ScheduleTable():
         return self.scheduleTable[day][tid]
     
     def updateWeight(self, numAvailTable, assignmentTable):
+        multiplier = [[1.0]*DAY_SLOTS for _ in range(DAYS)]
         # 0. null out infeasible arrays according to the rule
         # (0-1) If the slot is already occupied, it is not possible to assign it again
         for day in range(DAYS):
             for tid in range(DAY_SLOTS):
+                self.weightTable[day][tid] = 0.0
                 if self.scheduleTable[day][tid] != State.EMPTY:
-                    self.weightTable[day][tid] = float('-inf')
-                else:
-                    self.weightTable[day][tid] = 0.0
+                    multiplier[day][tid] = float('-inf')
+                    
         # (0-2) numWorks + newWork should not exceed MAX_WORK_PER_PERSON
         for tid in range(DAY_SLOTS):
             if self.numWorks + workDuration(tid) > MAX_WORK_PER_PERSON:
                 for day in range(DAYS):
-                    self.weightTable[day][tid] = float('-inf')
+                    multiplier[day][tid] = float('-inf')
         # (0-3) Special rule: one worker cannot be assigned to more than one earliest/latest slot
         for tid in (0, -1):
             if any(self.scheduleTable[day][tid] == State.WORK for day in range(DAYS)):
                 for day in range(DAYS):
-                    self.weightTable[day][tid] = float('-inf')
+                    multiplier[day][tid] = float('-inf')
 
         # 1. Every slot must have 1~2 worker.
         # (1-1) If the slot is empty, inversely proportional to number of available candidates
@@ -115,8 +116,7 @@ class ScheduleTable():
                 alpha = defaultPriority[tid]/(numAvailTable[day][tid]+0.01)
                 self.weightTable[day][tid] += alpha
                 if assignmentTable.numAssigned(day, tid) == 1 and tid != 0 and tid != DAY_SLOTS-1:
-                    self.weightTable[day][tid] *= 0.5
-                # self.weightTable[day][tid] += defaultPriority[tid]
+                    multiplier[day][tid] *= 0.2
         
         # 2. Each work should be at least 1 hour long.
         # (2-1) high priority to work-adjacent slot, especially if current work slot is single
@@ -128,7 +128,7 @@ class ScheduleTable():
                 if (tid+1 == DAY_SLOTS or self.scheduleTable[day][tid+1] != State.WORK) and startTid != None:
                     endTid = tid
                     # update startTid-1, endTid+1
-                    beta = 100.0 if startTid == endTid else 10.0
+                    beta = 100.0 if startTid == endTid else 20.0
                     if startTid-1 >= 0 and adjacent(startTid-1, startTid):
                         self.weightTable[day][startTid-1] += beta
                     if endTid+1 < DAY_SLOTS and adjacent(endTid, endTid+1):
@@ -149,7 +149,7 @@ class ScheduleTable():
             if startTid == None:
                 continue
             for tid in range(DAY_SLOTS):
-                gamma = 100
+                gamma = 10
                 if tid < startTid:
                     gamma *= (1 - 0.01*(timeDist(tid, startTid)**2))
                 elif tid > endTid:
@@ -161,17 +161,14 @@ class ScheduleTable():
         delta = 1.0 - (0.01*self.numWorks)
         for day in range(DAYS):
             for tid in range(DAY_SLOTS):
-                self.weightTable[day][tid] *= delta
+                multiplier[day][tid] *= delta
                 if MIN_WORK_PER_PERSON < self.numWorks:
-                    self.weightTable[day][tid] *= 0.7
-                if self.numWorks + workDuration(tid) > MAX_WORK_PER_PERSON:
-                    self.weightTable[day][tid] = float('-inf')
+                    multiplier[day][tid] *= 0.7
 
-        # 5. Adjustment according to the number of assigned people
+        # 5. Apply global multiplier
         for day in range(DAYS):
             for tid in range(DAY_SLOTS):
-                if assignmentTable.numAssigned(day, tid) == 1:
-                    self.weightTable[day][tid] *= 0.5
+                self.weightTable[day][tid] *= multiplier[day][tid]
             
 
     def assignWork(self, day, tid):
@@ -262,7 +259,8 @@ def main():
     matcher = TableMatcher(classSchedule)
     matcher.match()
     printResult(matcher)
-    # input("Press enter to exit..")
+    if len(sys.argv) < 2:
+        input("Press enter to exit..")
 
 if __name__ == "__main__":
     main()
