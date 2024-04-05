@@ -2,6 +2,7 @@ from tkinter.filedialog import askopenfilename
 import sys
 from collections import defaultdict
 from enum import Enum
+from tabulate import tabulate
 
 DAYS = 5
 MIN_WORK_PER_PERSON = 10
@@ -28,6 +29,8 @@ defaultDayTime = \
      ((17, 00), (17, 30)),\
      ((17, 30), (18, 00)),\
      ((18, 00), (19, 30))]
+defaultPriority = \
+    [5000, 300, 200, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 200, 300, 5000]
 DAY_SLOTS = len(defaultDayTime)
 
 def timeToInt(x):
@@ -48,16 +51,23 @@ def timeDist(tid1, tid2):
 
 class AssignmentTable():
     def __init__(self):
-        self.table = [[None]*DAY_SLOTS for _ in range(DAYS)]
+        self.table = [[list() for _ in range(DAY_SLOTS)] for _ in range(DAYS)]
 
     def assignPerson(self, day, tid, person):
-        self.table[day][tid] = person
+        self.table[day][tid].append(person)
     
     def getAssignment(self, day, tid):
         return self.table[day][tid]
+    
+    def numAssigned(self, day, tid):
+        return len(self.table[day][tid])
 
     def asTable(self):
-        return self.table
+        newTable = []
+        for tid in range(DAY_SLOTS):
+            newTable.append([" ".join(self.table[day][tid]) for day in range(DAYS)])
+        return newTable
+
 class ScheduleTable():
     def __init__(self, classSchedule):
         self.scheduleTable = [[State.EMPTY]*DAY_SLOTS for _ in range(DAYS)]
@@ -76,14 +86,40 @@ class ScheduleTable():
     def getSchedule(self, day, tid):
         return self.scheduleTable[day][tid]
     
-    def updateWeight(self, numAvailTable):
-        # 1. inversely proportional to number of available candidates
+    def updateWeight(self, numAvailTable, assignmentTable):
+        # 0. null out infeasible arrays according to the rule
+        # (0-1) If the slot is already occupied, it is not possible to assign it again
         for day in range(DAYS):
             for tid in range(DAY_SLOTS):
-                alpha = 1.0/(numAvailTable[day][tid]+1)
-                self.weightTable[day][tid] = 100*alpha
+                if self.scheduleTable[day][tid] != State.EMPTY:
+                    self.weightTable[day][tid] = float('-inf')
+                else:
+                    self.weightTable[day][tid] = 0.0
+        # (0-2) numWorks + newWork should not exceed MAX_WORK_PER_PERSON
+        for tid in range(DAY_SLOTS):
+            if self.numWorks + workDuration(tid) > MAX_WORK_PER_PERSON:
+                for day in range(DAYS):
+                    self.weightTable[day][tid] = float('-inf')
+        # (0-3) Special rule: one worker cannot be assigned to more than one earliest/latest slot
+        for tid in (0, -1):
+            if any(self.scheduleTable[day][tid] == State.WORK for day in range(DAYS)):
+                for day in range(DAYS):
+                    self.weightTable[day][tid] = float('-inf')
+
+        # 1. Every slot must have 1~2 worker.
+        # (1-1) If the slot is empty, inversely proportional to number of available candidates
+        #       This makes the assignment prioritize slots with limited possible workers.
+        # (1-2) If the slot already has worker assigned, less prioritized
+        for day in range(DAYS):
+            for tid in range(DAY_SLOTS):
+                alpha = defaultPriority[tid]/(numAvailTable[day][tid]+0.01)
+                self.weightTable[day][tid] += alpha
+                if assignmentTable.numAssigned(day, tid) == 1 and tid != 0 and tid != DAY_SLOTS-1:
+                    self.weightTable[day][tid] *= 0.5
+                # self.weightTable[day][tid] += defaultPriority[tid]
         
-        # 2. high priority to work-adjacent slot, especially if current work slot is single
+        # 2. Each work should be at least 1 hour long.
+        # (2-1) high priority to work-adjacent slot, especially if current work slot is single
         for day in range(DAYS):
             startTid = None
             for tid in range(DAY_SLOTS):
@@ -92,7 +128,7 @@ class ScheduleTable():
                 if (tid+1 == DAY_SLOTS or self.scheduleTable[day][tid+1] != State.WORK) and startTid != None:
                     endTid = tid
                     # update startTid-1, endTid+1
-                    beta = 50.0 if startTid == endTid else 10.0
+                    beta = 100.0 if startTid == endTid else 10.0
                     if startTid-1 >= 0 and adjacent(startTid-1, startTid):
                         self.weightTable[day][startTid-1] += beta
                     if endTid+1 < DAY_SLOTS and adjacent(endTid, endTid+1):
@@ -113,32 +149,30 @@ class ScheduleTable():
             if startTid == None:
                 continue
             for tid in range(DAY_SLOTS):
-                gamma = 1.0
+                gamma = 100
                 if tid < startTid:
-                    gamma -= 0.01*(timeDist(tid, startTid)**2)
+                    gamma *= (1 - 0.01*(timeDist(tid, startTid)**2))
                 elif tid > endTid:
-                    gamma -= 0.01*(timeDist(tid, endTid)**2)
-                self.weightTable[day][tid] *= gamma
+                    gamma *= (1 - 0.1*(timeDist(tid, endTid)**2))
+                self.weightTable[day][tid] += gamma
 
-        # 4. Global adjustment according to each person
-        # Includes numWorks, hours need to work...
-        delta = 1.0 - (0.01*self.numWorks)
-        if MIN_WORK_PER_PERSON <= self.numWorks < MAX_WORK_PER_PERSON:
-            delta *= 0.5
-        elif self.numWorks > MAX_WORK_PER_PERSON:
-            delta = 0.0
+        # 4. Global adjustment according to each person, such as numWorks
         
+        delta = 1.0 - (0.01*self.numWorks)
         for day in range(DAYS):
             for tid in range(DAY_SLOTS):
-                # 1. inversely proportional to number of available candidates
                 self.weightTable[day][tid] *= delta
+                if MIN_WORK_PER_PERSON < self.numWorks:
+                    self.weightTable[day][tid] *= 0.7
+                if self.numWorks + workDuration(tid) > MAX_WORK_PER_PERSON:
+                    self.weightTable[day][tid] = float('-inf')
 
-            
-        # 5. null out infeasible arrays
+        # 5. Adjustment according to the number of assigned people
         for day in range(DAYS):
             for tid in range(DAY_SLOTS):
-                if self.scheduleTable[day][tid] != State.EMPTY:
-                    self.weightTable[day][tid] = float('-inf')
+                if assignmentTable.numAssigned(day, tid) == 1:
+                    self.weightTable[day][tid] *= 0.5
+            
 
     def assignWork(self, day, tid):
         if self.scheduleTable[day][tid] != State.EMPTY:
@@ -159,7 +193,7 @@ class TableMatcher():
 
     def match(self):        
         # One cell by one, assign a cell
-        for _ in range(DAYS * len(defaultDayTime)):
+        for _ in range(DAYS * len(defaultDayTime) * 2):
             # 1. Update weights
             numAvailTable = [[0]*DAY_SLOTS for _ in range(DAYS)]
             for scheduleTable in self.scheduleTables.values():
@@ -169,17 +203,27 @@ class TableMatcher():
                             if scheduleTable.getSchedule(day, tid) == State.EMPTY:
                                 numAvailTable[day][tid] += 1
             for scheduleTable in self.scheduleTables.values():
-                scheduleTable.updateWeight(numAvailTable)
+                scheduleTable.updateWeight(numAvailTable, self.assignmentTable)
 
             # 2. Choose a slot with max weight
             maxPerson, maxDay, maxTid, maxWeight = None, None, None, float('-inf')
             for day in range(DAYS):
                 for tid in range(DAY_SLOTS):
-                    if self.assignmentTable.getAssignment(day, tid) == None:
+                    if self.assignmentTable.numAssigned(day, tid) < 2:
                         for person, scheduleTable in self.scheduleTables.items():
                             weight = scheduleTable.getWeight(day, tid)
                             if weight > maxWeight:
                                 maxPerson, maxDay, maxTid, maxWeight = person, day, tid, weight
+
+            # if (maxPerson == "H" or maxPerson == "J") and maxTid == 15:
+            #     print("> ")
+            #     print("A", self.scheduleTables["A"].getWeight(3, 15))
+            #     print("H", self.scheduleTables["H"].getWeight(3, 15))
+            #     print("J", self.scheduleTables["J"].getWeight(3, 15))
+            #     print(numAvailTable[1][15], numAvailTable[2][15], numAvailTable[4][15])
+            #     print("<")
+            # print(f"{maxPerson}\t{maxDay}\t{maxTid}\t{maxWeight}")
+
             # 3. Assign
             if maxPerson == None:
                 break
@@ -203,8 +247,7 @@ def parseInput(inputFile):
 def printResult(matcher):
     print("Assignment")
     assignment = matcher.assignment()
-    for day in range(DAYS):
-        print(assignment[day])
+    print(tabulate(assignment, headers=["Mon", "Tue", "Wed", "Thr", "Fri"]))
     
     print("Total Works")
     print(matcher.workHours())
@@ -219,7 +262,7 @@ def main():
     matcher = TableMatcher(classSchedule)
     matcher.match()
     printResult(matcher)
-    input("Press enter to exit..")
+    # input("Press enter to exit..")
 
 if __name__ == "__main__":
     main()
